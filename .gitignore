@@ -30,3 +30,21 @@
 *.exe
 *.out
 *.app
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# VSCode
+.vscode/
+shell_scripts/
+
+# Build directory
+build/
+
+# Data
+data/tmp/
+
+# Log directory
+log/

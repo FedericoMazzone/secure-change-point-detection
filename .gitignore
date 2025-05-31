@@ -45,6 +45,8 @@ build/
 
 # Data
 data/tmp/
+data/out/
+data/**/*.png
 
 # Log directory
-log/
+logs/

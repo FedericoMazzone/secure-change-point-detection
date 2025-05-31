@@ -1,14 +1,21 @@
-# for epsilon in 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0
-# repeating each experiment 10 times
-# run ./build/clustering -f data/generated/points_d2_n10000_k8.csv -k 8 -r 2 -e epsilon -t
-# store the output and error of each run in a file
+#!/bin/bash
 
-for epsilon in 0.5 1.0 2.0 3.0 4.0 5.0
-do
-    for i in $(seq 1 30)
-    do
-        echo "Running epsilon=$epsilon, iteration=$i..."
-        filename="s1_epsilon${epsilon}_run${i}.log"
-        ./build/clustering -f data/s1.csv -k 15 -r 2 -e $epsilon -t -id 5 > $filename 2>&1
-    done
+# Root directories
+input_root="data/generated"
+output_root="logs"
+
+# Find all .csv files
+find "$input_root" -type f -name "*.csv" | while read -r csv_file; do
+    # Compute the relative path from input_root
+    relative_path="${csv_file#$input_root/}"
+    
+    # Replace .csv with .out and prepend logs/ path
+    output_file="$output_root/${relative_path%.csv}.out"
+    
+    # Create the output directory if it doesn't exist
+    output_dir=$(dirname "$output_file")
+    mkdir -p "$output_dir"
+
+    # Run the command and save stdout and stderr
+    ./build/cpd -f "$csv_file" -l -v > "$output_file" 2>&1
 done

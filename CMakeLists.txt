@@ -61,13 +61,8 @@ endif()
 set( SOURCES
         src/utils-basics.cpp
         src/utils-eval.cpp
+        src/utils-matrices.cpp
         src/utils-ptxt.cpp
+        src/cpd.cpp
 )
-add_executable( clustering ${SOURCES} src/diff-privacy.cpp src/clustering.cpp )
-add_executable( clustering-sub ${SOURCES} src/clustering-sub.cpp )
-
-# Link against librt
-target_link_libraries(clustering rt)
-target_link_libraries(clustering-sub rt)
-
-target_link_libraries(clustering pthread)
+add_executable( cpd ${SOURCES} )

@@ -1,4 +1,4 @@
-# Privacy-Preserving Vertical K-Means Clustering
+# Privacy-Preserving Change-Point Detection
 
 This repository provides a library for performing change-point detection for time series, using the CKKS (Cheon-Kim-Kim-Song) homomorphic encryption scheme.
 Our code is built on top of the OpenFHE library.
@@ -56,6 +56,6 @@ Follow these steps to compile our library and build the demo and benchmarking ex
 
 6. **Run the Executables**
 
-   After successful compilation, the `clustering` executable will be available in the `build` directory.
+   After successful compilation, the `cpd` executable will be available in the `build` directory.
 
 ---

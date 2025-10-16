@@ -534,6 +534,8 @@ int main(int argc, char* argv[])
                       << "[-l|--labeled] "
                       << "[-v|--verbose] "
                       << "[-h|--help] "
+                      << "[-b|--block-size <size>] "
+                      << "[-t|--type <mean|variance|distribution>] "
                       << std::endl;
             return 0;
         }

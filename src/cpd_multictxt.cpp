@@ -7,6 +7,7 @@
 
 #include <cassert>
 #include <filesystem>
+#include <omp.h>
 
 
 using namespace lbcrypto;
@@ -172,29 +173,18 @@ size_t cpd
             }
 
             // Normalize by the number of triplets
-            // std::cout << "q[" << i << "] = " << (size_t) q[i] << std::endl;
             q[i] /= blockSize - 2;
         }
-        // print q max and min
-        std::cout << "q min: " << *std::min_element(q.begin(), q.end())
-                  << ", q max: " << *std::max_element(q.begin(), q.end())
-                  << std::endl;
 
         // CUSUM statistic: for each i = 1, ..., numBlocks - 1
         // compute s[i] = | sum(q[0:i]) - i/numBlocks * sum(q[0:numBlocks]) |
         std::vector<double> s(numBlocks - 1, 0.0);
         double sumQ = std::accumulate(q.begin(), q.end(), 0.0);
-        std::cout << "Total sumQ: " << sumQ << std::endl;
         for (size_t i = 0; i < numBlocks - 1; i++)
         {
             double sumQ_i = std::accumulate(q.begin(), q.begin() + i + 1, 0.0);
-            std::cout << "sumQ_" << i << ": " << sumQ_i << std::endl;
             s[i] = std::abs(sumQ_i - (i + 1) * sumQ / numBlocks);
         }
-        // print s max and min
-        std::cout << "s min: " << *std::min_element(s.begin(), s.end())
-                  << ", s max: " << *std::max_element(s.begin(), s.end())
-                  << std::endl;
 
         // Find the index of the maximum value in s
         size_t maxIndex = 0;
@@ -646,6 +636,7 @@ int main(int argc, char* argv[])
         indices.push_back(-(1 << i));
         indices.push_back(-(1 << (LOG2(numColumns) + i)));
     }
+    indices.push_back(255);
     indices.push_back(-256);
     indices.push_back(-512);
     indices.push_back(-768);
@@ -658,34 +649,6 @@ int main(int argc, char* argv[])
         numSlots,
         false, true
     );
-
-
-
-    ////////////////////////////////////////////////////////////////////////
-    //                       Time Series Encryption                       //
-    ////////////////////////////////////////////////////////////////////////
-
-
-    // assuming the number of points is 1024*1024 = 1048576
-    std::vector<std::vector<double>> paddedX(numCiphertexts, std::vector<double>(numSlots, 0.0));
-    for (size_t i = 0; i < numBlocks; i++)
-    {
-        size_t k = 4 * (i / (4 * numBlocksPerCtxt)) + (i % 4);
-        // std::cout << "Block " << i << " goes to ciphertext " << k << std::endl;
-        for (size_t j = 0; j < blockSize; j++)
-            paddedX[k][((i / 4) % numBlocksPerCtxt) * numColumns + j] = x[i * blockSize + j];
-    }
-
-    // Encrypting the time series data
-    std::vector<Ciphertext<DCRTPoly>> X(numCiphertexts);
-    for (size_t k = 0; k < numCiphertexts; k++)
-    {
-        X[k] = cryptoContext->Encrypt(
-            keyPair.publicKey,
-            cryptoContext->MakeCKKSPackedPlaintext(paddedX[k])
-        );
-        printCtxt(cryptoContext, keyPair.secretKey, X[k], "Encrypted time series", numColumns, numBlocks);
-    }
 
 
 
@@ -717,11 +680,51 @@ int main(int argc, char* argv[])
     std::vector<double> diagonal(numSlots, 0.0);
     for (size_t i = 0; i < 256; i++)
     {
-            assert (i * 256 + i < numSlots);
-            diagonal[i * 256 + i] = 0.5;
+        assert (i * 256 + i < numSlots);
+        diagonal[i * 256 + i] = 0.5;
     }
 
-    std::cout << "DONE" << std::endl;
+    std::vector<double> maskCol(numSlots, 0.0);
+    for (size_t i = 0; i < numBlocksPerCtxt; i++)
+    {
+        assert (i * numColumns < numSlots);
+        maskCol[i * numColumns] = 1.0 / (blockSize - 2);
+    }
+
+    std::vector<double> singletonMask(numSlots, 0.0);
+    singletonMask[0] = 1.0;
+
+    std::vector<double> zeroVec(numSlots, 0.0);
+    auto zeroC = cryptoContext->Encrypt(
+        keyPair.publicKey,
+        cryptoContext->MakeCKKSPackedPlaintext(zeroVec)
+    );
+
+
+
+    ////////////////////////////////////////////////////////////////////////
+    //                       Time Series Encryption                       //
+    ////////////////////////////////////////////////////////////////////////
+
+
+    // assuming the number of points is 1024*1024 = 1048576
+    std::vector<std::vector<double>> paddedX(numCiphertexts, std::vector<double>(numSlots, 0.0));
+    for (size_t i = 0; i < numBlocks; i++)
+    {
+        size_t k = 4 * (i / (4 * numBlocksPerCtxt)) + (i % 4);
+        for (size_t j = 0; j < blockSize; j++)
+            paddedX[k][((i / 4) % numBlocksPerCtxt) * numColumns + j] = x[i * blockSize + j];
+    }
+
+    // Encrypting the time series data
+    std::vector<Ciphertext<DCRTPoly>> X(numCiphertexts);
+    for (size_t k = 0; k < numCiphertexts; k++)
+    {
+        X[k] = cryptoContext->Encrypt(
+            keyPair.publicKey,
+            cryptoContext->MakeCKKSPackedPlaintext(paddedX[k])
+        );
+    }
 
 
 
@@ -834,142 +837,112 @@ int main(int argc, char* argv[])
     // }
     // else if (changePointType == 2)
     // {
-    std::vector<double> zeroVec0(numSlots, 0.0);
+
     std::cout << "Change-point type: distribution" << std::endl;
 
-    // null ciphertext encryption of zero
-    std::vector<double> zeroVec(numSlots, 0.0);
-    std::cout << "Encrypting zero ciphertext..." << std::flush;
-    auto zeroC = cryptoContext->Encrypt(
-            keyPair.publicKey,
-            cryptoContext->MakeCKKSPackedPlaintext(zeroVec)
-        );
-    std::cout << "DONE" << std::endl << std::flush;
-    printCtxt(cryptoContext, keyPair.secretKey, zeroC, "Encryption of zero");
-
-
     std::vector<Ciphertext<DCRTPoly>> Q(numCiphertexts);
-    Ciphertext<DCRTPoly> QT = zeroC;
+
+    omp_set_max_active_levels(4);
     
+    #pragma omp parallel for
     for(size_t k = 0; k < numCiphertexts; k++)
     {
+        #pragma omp critical
+        { std::cout << "Processing ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
         Ciphertext<DCRTPoly> C = compareAdv(X[k], (X[k] << 1), dg_ct, df_ct);
-        printCtxt(cryptoContext, keyPair.secretKey, C, "Comparison result", numColumns, numBlocksPerCtxt);
         Ciphertext<DCRTPoly> D = C + (C << 1);
-        printCtxt(cryptoContext, keyPair.secretKey, D, "D", numColumns, numBlocksPerCtxt);
         Ciphertext<DCRTPoly> E = D - 1;
-        printCtxt(cryptoContext, keyPair.secretKey, E, "E", numColumns, numBlocksPerCtxt);
         Ciphertext<DCRTPoly> F = 1 - (E * E);
-        printCtxt(cryptoContext, keyPair.secretKey, F, "F", numColumns, numBlocksPerCtxt);
         Ciphertext<DCRTPoly> G = F * rectMask;
-        printCtxt(cryptoContext, keyPair.secretKey, G, "G", numColumns, numBlocksPerCtxt);
         Ciphertext<DCRTPoly> H = sumColumns(G, numColumns);
-        std::vector<double> maskCol(numSlots, 0.0);
-        for (size_t i = 0; i < numBlocksPerCtxt; i++)
-        {
-            assert (i * numColumns < numSlots);
-            maskCol[i * numColumns] = 1.0 / (blockSize - 2);
-        }
         Q[k] = H * maskCol;
-        printCtxt(cryptoContext, keyPair.secretKey, Q[k], "Q", numColumns, numBlocksPerCtxt);
-        QT += Q[k];
+        #pragma omp critical
+        { std::cout << "Finished ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
     }
 
-    // compacting Q into less ciphertexts
+
     // assuming 16 ciphertexts, 1024x1024
     std::vector<Ciphertext<DCRTPoly>> Q_compact(4);
-    Q_compact[0] = Q[0] + (Q[1] >> 256) + (Q[2] >> 512) + (Q[3] >> 768);
-    printCtxt(cryptoContext, keyPair.secretKey, Q_compact[0], "Q_compact[0] before partial sums", 256, 256, 256);
-    Q_compact[1] = Q[4] + (Q[5] >> 256) + (Q[6] >> 512) + (Q[7] >> 768);
-    printCtxt(cryptoContext, keyPair.secretKey, Q_compact[1], "Q_compact[1] before partial sums", 256, 256, 256);
-    Q_compact[2] = Q[8] + (Q[9] >> 256) + (Q[10] >> 512) + (Q[11] >> 768);
-    printCtxt(cryptoContext, keyPair.secretKey, Q_compact[2], "Q_compact[2] before partial sums", 256, 256, 256);
-    Q_compact[3] = Q[12] + (Q[13] >> 256) + (Q[14] >> 512) + (Q[15] >> 768);
-    printCtxt(cryptoContext, keyPair.secretKey, Q_compact[3], "Q_compact[3] before partial sums", 256, 256, 256);
+    #pragma omp parallel for
+    for (size_t i = 0; i < 4; i++)
+    {
+        // compacting Q into less ciphertexts
+        Q_compact[i] = Q[4*i] + (Q[4*i + 1] >> 256) + (Q[4*i + 2] >> 512) + (Q[4*i + 3] >> 768);
 
-    // computing partial sums
-    Q_compact[0] = replicateColumn(Q_compact[0], 256);
-    printCtxt(cryptoContext, keyPair.secretKey, Q_compact[0], "Q_compact[0] after replication", 256, 256);
-    Q_compact[1] = replicateColumn(Q_compact[1], 256);
-    printCtxt(cryptoContext, keyPair.secretKey, Q_compact[1], "Q_compact[1] after replication", 256, 256);
-    Q_compact[2] = replicateColumn(Q_compact[2], 256);
-    printCtxt(cryptoContext, keyPair.secretKey, Q_compact[2], "Q_compact[2] after replication", 256, 256);
-    Q_compact[3] = replicateColumn(Q_compact[3], 256);
-    printCtxt(cryptoContext, keyPair.secretKey, Q_compact[3], "Q_compact[3] after replication", 256, 256);
+        // computing partial sums
+        Q_compact[i] = replicateColumn(Q_compact[i], 256);
+    }
 
     std::vector<Ciphertext<DCRTPoly>> QP(4);
-    QP[0] = sumRows(Q_compact[0] * triangularMask, 256, true);
-    printCtxt(cryptoContext, keyPair.secretKey, QP[0], "QP[0]", 256, 1, 256);
-    QP[1] = sumRows(Q_compact[0] + Q_compact[1] * triangularMask, 256, true);
-    printCtxt(cryptoContext, keyPair.secretKey, QP[1], "QP[1]", 256, 1, 256);
-    QP[2] = sumRows(Q_compact[0] + Q_compact[1] + Q_compact[2] * triangularMask, 256, true);
-    printCtxt(cryptoContext, keyPair.secretKey, QP[2], "QP[2]", 256, 1, 256);
-    QP[3] = sumRows(Q_compact[0] + Q_compact[1] + Q_compact[2] + Q_compact[3] * triangularMask, 256, true);
-    printCtxt(cryptoContext, keyPair.secretKey, QP[3], "QP[3]", 256, 1, 256);
+    #pragma omp parallel for
+    for (size_t i = 0; i < 4; i++)
+    {
+        QP[i] = Q_compact[i] * triangularMask;
+        for (size_t j = 0; j < i; j++)
+            QP[i] = QP[i] + Q_compact[j];
+        QP[i] = sumRows(QP[i], 256, true);
+    }
 
     // replicate total sum QT
-    // QT = sumRows(QT, numColumns);
-    for (size_t i = 0; i < LOG2(numBlocksPerCtxt); i++)
-        QT += QT >> (1 << (LOG2(numColumns) + i));
-    std::vector<double> singletonMask(numSlots, 0.0);
-    singletonMask[0] = 1.0;
+    Ciphertext<DCRTPoly> QT = QP[3] << 255;
     QT = QT * singletonMask;
     QT = replicateColumn(QT, 256);
-    printCtxt(cryptoContext, keyPair.secretKey, QT, "Replicated QT", 256, 1);
 
     // compute CUSUM statistic S
+    // S are 4 ciphertexts each with 256 elements on the first row
     std::vector<Ciphertext<DCRTPoly>> S(4);
+    #pragma omp parallel for
     for (size_t i = 0; i < 4; i++)
     {
         S[i] = QP[i] - multConstant[i] * QT;
         S[i] = S[i] * S[i];
         S[i] = S[i] * (0.5 / numBlocks);
-        printCtxt(cryptoContext, keyPair.secretKey, S[i], "CUSUM statistic", 256, 1, 256);
     }
-    // S are 4 ciphertexts each with 256 elements on the first row
 
     // Compute argmax of S
     std::vector<Ciphertext<DCRTPoly>> SR(4);
     std::vector<Ciphertext<DCRTPoly>> SC(4);
+    #pragma omp parallel for collapse(2)
     for (size_t i = 0; i < 4; i++)
-    {
-        SR[i] = replicateRow(S[i], 256);
-        printCtxt(cryptoContext, keyPair.secretKey, SR[i], "SR", numColumns, numBlocks);
-        SC[i] = transposeRow(S[i], 256, true);
-        printCtxt(cryptoContext, keyPair.secretKey, SC[i], "SC before replication", numColumns, numBlocks);
-        SC[i] = replicateColumn(SC[i], 256);
-        printCtxt(cryptoContext, keyPair.secretKey, SC[i], "SC", numColumns, numBlocks);
-    }
+        for (size_t j = 0; j < 2; j++)
+        {
+            if (j == 0)
+                SR[i] = replicateRow(S[i], 256);
+            else
+            {
+                SC[i] = transposeRow(S[i], 256, true);
+                SC[i] = replicateColumn(SC[i], 256);
+            }
+        }
 
     std::vector<std::vector<Ciphertext<DCRTPoly>>> CMP(4, std::vector<Ciphertext<DCRTPoly>>(4));
+    #pragma omp parallel for collapse(2)
     for (size_t i = 0; i < 4; i++)
-    {
         for (size_t j = 0; j < 4; j++)
         {
+            #pragma omp critical
+            { std::cout << "Comparing SR[" << i << "] and SC[" << j << "]" << std::endl; }
             CMP[i][j] = compareAdv(SR[i], SC[j], dg_ca, df_ca);
-            printCtxt(cryptoContext, keyPair.secretKey, CMP[i][j], "Argmax comparison result", numColumns, numColumns);
+            #pragma omp critical
+            { std::cout << "Finished comparing SR[" << i << "] and SC[" << j << "]" << std::endl; }
         }
-        CMP[i][i] = CMP[i][i] + diagonal;
-    }
     
     std::vector<Ciphertext<DCRTPoly>> R(4);
+    #pragma omp parallel for
     for (size_t i = 0; i < 4; i++)
     {
-        R[i] = CMP[i][0];
-        for (size_t j = 1; j < 4; j++)
-            R[i] = R[i] * CMP[i][j];
-        printCtxt(cryptoContext, keyPair.secretKey, R[i], "R" + std::to_string(i), 256, 256);
+        CMP[i][i] = CMP[i][i] + diagonal;
+        R[i] = (CMP[i][0] * CMP[i][1]) * (CMP[i][2] * CMP[i][3]);
         for (size_t j = 0; j < LOG2(256); j++)
-        {
             R[i] = R[i] * (R[i] >> (1 << (LOG2(256) + j)));
-            printCtxt(cryptoContext, keyPair.secretKey, R[i], "Argmax comparison result after multiplication " + std::to_string(j + 1), 256, 256);
-        }
     }
     // else
     // {
     //     std::cerr << "Unknown change-point type: " << changePointType << std::endl;
     //     return 1;
     // }
+
+    printCtxt(cryptoContext, keyPair.secretKey, R[0], "Computed change-point part 0", 256, 1);
 
     double runtime = TOC(t);
     std::cout << "CPD runtime: " << runtime << "s" << std::endl;

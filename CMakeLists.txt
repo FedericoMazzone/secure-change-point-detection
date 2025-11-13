@@ -65,4 +65,5 @@ set( SOURCES
         src/utils-ptxt.cpp
         src/cpd.cpp
 )
+
 add_executable( cpd ${SOURCES} )

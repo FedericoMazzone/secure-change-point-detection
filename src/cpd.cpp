@@ -580,6 +580,7 @@ int main(int argc, char* argv[])
 
     // Initialize timers
     auto t = std::chrono::high_resolution_clock::now();
+    auto t1 = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsedSeconds;
     std::cout << std::fixed << std::setprecision(3);
     #undef TOC
@@ -810,6 +811,9 @@ int main(int argc, char* argv[])
     else if (changePointType == 2)
     {
         std::cout << "Change-point type: frequency" << std::endl;
+
+        std::cout << "Computing turning rates..." << std::endl;
+        TIC(t1);
         
         #pragma omp parallel for
         for(size_t k = 0; k < numCiphertexts; k++)
@@ -826,12 +830,18 @@ int main(int argc, char* argv[])
             #pragma omp critical
             { std::cout << "Finished ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
         }
+
+        std::cout << "Turning rates computed in " << TOC(t1) << "s" << std::endl;
     }
     else
     {
         std::cerr << "Unknown change-point type: " << changePointType << std::endl;
         return 1;
     }
+
+
+    std::cout << "Computing partial sums..." << std::endl;
+    TIC(t1);
 
     std::vector<Ciphertext<DCRTPoly>> Q_compact(numCompactCiphertexts);
     #pragma omp parallel for
@@ -856,6 +866,8 @@ int main(int argc, char* argv[])
         QP[k] = sumRows(QP[k], size);
     }
 
+    std::cout << "Partial sums computed in " << TOC(t1) << "s" << std::endl;
+
     // replicate total sum QT
     Ciphertext<DCRTPoly> QT = QP[numCompactCiphertexts - 1] << indexQT;
     QT = QT * singletonMask;
@@ -871,6 +883,9 @@ int main(int argc, char* argv[])
         auto mask = (k < numCompactCiphertexts - 1) ? normalizationMask : normalizationMaskLast;
         S[k] = S[k] * mask;
     }
+
+    std::cout << "Computing argmax..." << std::endl;
+    TIC(t1);
 
     // Compute argmax of S
     std::vector<Ciphertext<DCRTPoly>> SR(numCompactCiphertexts);
@@ -910,6 +925,8 @@ int main(int argc, char* argv[])
         for (size_t j = 0; j < LOG2(size); j++)
             R[i] = R[i] * (R[i] >> (1 << (LOG2(size) + j)));
     }
+
+    std::cout << "Argmax computed in " << TOC(t1) << "s" << std::endl;
 
     std::cout << "CPD runtime: " << TOC(t) << "s" << std::endl;
 

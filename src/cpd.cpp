@@ -554,16 +554,16 @@ int main(int argc, char* argv[])
     const size_t numBlocks = n / blockSize;
 
     // Num columns is the next power of 2 greater than or equal to blockSize
-    const size_t numColumns =
-        static_cast<size_t>(std::pow(2, std::ceil(std::log2(blockSize))));
+    const size_t numColumns = static_cast<size_t>(std::pow(2, std::ceil(std::log2(blockSize))));
 
     // Number of ciphertexts
-    const size_t maxSlots = 65536;
+    const size_t maxSlots = (numColumns < 256) ? numColumns * numColumns : 65536;
     const size_t numBlocksPerCtxt = maxSlots / numColumns;
-    const size_t compactRatio = std::max(256 / numBlocksPerCtxt, (size_t)1);
-    const size_t numCompactCiphertexts = std::ceil(1.0 * numBlocks / 256);
+    const size_t compactRatio = (numColumns < 256) ? 1 : std::max(256 / numBlocksPerCtxt, (size_t)1);
+    const size_t numCompactCiphertexts = (numColumns < 256) ? 1 : std::ceil(1.0 * numBlocks / 256);
     const size_t numCiphertexts = numCompactCiphertexts * compactRatio;
     const size_t indexQT = (numBlocks % 256 == 0 ? 256 : numBlocks % 256) - 1;
+    const size_t size = std::min(numColumns, (size_t)256);
 
     std::cout << "Change-point type: " 
               << (changePointType == 0 ? "mean" : changePointType == 1 ? "variance" : "frequency")
@@ -613,7 +613,7 @@ int main(int argc, char* argv[])
     const usint decimalPrecision    = 60 - (int) integralPrecision;
     const usint cmpCost             = 4 * (dg_ct + df_ct + dg_ca + df_ca) + 2;
     const usint multiplicativeDepth = cmpCost + 6 + LOG2(numColumns)
-                                      + (changePointType == 1 ? 3 : 0)
+                                      + (changePointType == 1 ? 1 : 0)
                                       + (changePointType == 2 ? 2 : 0);
     const usint numSlots            = maxSlots;
 
@@ -635,10 +635,10 @@ int main(int argc, char* argv[])
         indices.push_back(1 << i);
         indices.push_back(-(1 << i));
     }
-    for (size_t i = 0; i < LOG2(256); i++)
+    for (size_t i = 0; i < LOG2(size); i++)
     {
-        indices.push_back(-(1 << (LOG2(256) + i)));
-        indices.push_back(-(256 * (256 - 1) / (1 << (i + 1))));
+        indices.push_back(-(1 << (LOG2(size) + i)));
+        indices.push_back(-(size * (size - 1) / (1 << (i + 1))));
     }
     for (size_t i = 1; i < compactRatio; i++)
         indices.push_back(-(256 * i));
@@ -662,7 +662,6 @@ int main(int argc, char* argv[])
 
     std::cout << "Precomputations...";
 
-    std::cout << "rectMask" << std::endl;
     std::vector<double> rectMask(numSlots, 0.0);
     for (size_t i = 0; i < numBlocksPerCtxt; i++)
         for (size_t j = 0; j < blockSize - 2; j++)
@@ -671,27 +670,23 @@ int main(int argc, char* argv[])
             rectMask[i * numColumns + j] = 1.0;
     }
 
-    std::cout << "triangularMask" << std::endl;
     std::vector<double> triangularMask(numSlots, 0.0);
     for (size_t i = 0; i < std::min(numBlocks, (size_t)256); i++)
         for (size_t j = i; j < std::min(numBlocks, (size_t)256); j++)
         {
-            assert (i * std::min(numBlocks, (size_t)256) + j < numSlots);
-            triangularMask[i * std::min(numBlocks, (size_t)256) + j] = 1.0;
+            assert (i * size + j < numSlots);
+            triangularMask[i * size + j] = 1.0;
         }
 
-    std::cout << "normalizationMask" << std::endl;
     std::vector<double> normalizationMask(numSlots, 0.0);
     for (size_t i = 0; i < 256; i++)
         normalizationMask[i] = 2.0 / numBlocks;
 
-    std::cout << "normalizationMaskLast" << std::endl;
     std::vector<double> normalizationMaskLast(numSlots, 0.0);
     size_t limit = (numBlocks == numCompactCiphertexts * 256) ? 256 : (numBlocks % 256);
     for (size_t i = 0; i < limit; i++)
         normalizationMaskLast[i] = 2.0 / numBlocks;
 
-    std::cout << "multConstant" << std::endl;
     std::vector<std::vector<double>> multConstant(numCompactCiphertexts, std::vector<double>(numSlots, 0.0));
     for (size_t i = 0; i < numBlocks; i++)
     {
@@ -700,15 +695,27 @@ int main(int argc, char* argv[])
         multConstant[k][j] = 1.0 * (i + 1) / numBlocks;
     }
     
-    std::cout << "diagonal" << std::endl;
     std::vector<double> diagonal(numSlots, 0.0);
-    for (size_t i = 0; i < 256; i++)
+    for (size_t i = 0; i < size; i++)
     {
-        assert (i * 256 + i < numSlots);
-        diagonal[i * 256 + i] = 0.5;
+        assert (i * size + i < numSlots);
+        diagonal[i * size + i] = 0.5;
     }
 
-    std::cout << "maskCol" << std::endl;
+    std::vector<double> meanNorm(numSlots, 0.0);
+    for (size_t i = 0; i < numBlocksPerCtxt; i++)
+    {
+        assert (i * numColumns < numSlots);
+        meanNorm[i * numColumns] = 1.0 / blockSize;
+    }
+
+    std::vector<double> varNorm(numSlots, 0.0);
+    for (size_t i = 0; i < numBlocksPerCtxt; i++)
+    {
+        assert (i * numColumns < numSlots);
+        varNorm[i * numColumns] = 1.0 / (blockSize - 1);
+    }
+
     std::vector<double> maskCol(numSlots, 0.0);
     for (size_t i = 0; i < numBlocksPerCtxt; i++)
     {
@@ -716,16 +723,16 @@ int main(int argc, char* argv[])
         maskCol[i * numColumns] = 1.0 / (blockSize - 2);
     }
 
-    std::cout << "singletonMask" << std::endl;
     std::vector<double> singletonMask(numSlots, 0.0);
     singletonMask[0] = 1.0;
 
-    std::cout << "zeroC" << std::endl;
     std::vector<double> zeroVec(numSlots, 0.0);
     auto zeroC = cryptoContext->Encrypt(
         keyPair.publicKey,
         cryptoContext->MakeCKKSPackedPlaintext(zeroVec)
     );
+
+    std::cout << "DONE" << std::endl;
 
 
 
@@ -734,7 +741,9 @@ int main(int argc, char* argv[])
     ////////////////////////////////////////////////////////////////////////
 
 
-    std::cout << "Padding time series data..." << std::endl;
+    std::cout << "Encrypting time-series data...";
+    TIC(t);
+
     std::vector<std::vector<double>> paddedX(numCiphertexts, std::vector<double>(numSlots, 0.0));
     for (size_t i = 0; i < numBlocks; i++)
     {
@@ -742,8 +751,6 @@ int main(int argc, char* argv[])
         for (size_t j = 0; j < blockSize; j++)
             paddedX[k][((i / compactRatio) % numBlocksPerCtxt) * numColumns + j] = x[i * blockSize + j];
     }
-    std::cout << "padding done" << std::endl;
-
     // Encrypting the time series data
     std::vector<Ciphertext<DCRTPoly>> X(numCiphertexts);
     for (size_t k = 0; k < numCiphertexts; k++)
@@ -753,7 +760,8 @@ int main(int argc, char* argv[])
             cryptoContext->MakeCKKSPackedPlaintext(paddedX[k])
         );
     }
-    std::cout << "encryption done" << std::endl;
+
+    std::cout << "DONE (" << TOC(t) << "s)" << std::endl;
 
 
 
@@ -765,128 +773,65 @@ int main(int argc, char* argv[])
     std::cout << "Starting change-point detection..." << std::endl;
     TIC(t);
 
-    // Ciphertext<DCRTPoly> R;
-
-    // if (changePointType == 0)
-    // {
-    //     std::cout << "Change-point type: mean" << std::endl;
-
-    //     Ciphertext<DCRTPoly> Q = sumColumns(X, numColumns, true);
-    //     printCtxt(cryptoContext, keyPair.secretKey, Q, "Sum of blocks", numColumns, numBlocks);
-
-    //     Q = (1.0 / blockSize) * Q;
-    //     printCtxt(cryptoContext, keyPair.secretKey, Q, "Mean of blocks", numColumns, numBlocks);
-
-    //     Ciphertext<DCRTPoly> QT = replicateColumn(sumRows(Q, numColumns, true), numColumns);
-    //     printCtxt(cryptoContext, keyPair.secretKey, QT, "QT", numColumns, numBlocks);
-
-    //     Ciphertext<DCRTPoly> QP = replicateColumn(Q, numColumns) * triangularMask;
-    //     QP = sumRows(QP, numColumns, true);
-    //     printCtxt(cryptoContext, keyPair.secretKey, QP, "QP", numColumns, numBlocks);
-
-    //     Ciphertext<DCRTPoly> S = QP - multConstant * QT;
-    //     S = S * S;
-    //     printCtxt(cryptoContext, keyPair.secretKey, S, "CUSUM statistic", numColumns, numBlocks);
-
-    //     // Compute argmax of S
-    //     S = S * (2.0 / numBlocks);
-    //     Ciphertext<DCRTPoly> SR = replicateRow(S, numColumns);
-    //     printCtxt(cryptoContext, keyPair.secretKey, SR, "SR", numColumns, numBlocks);
-
-    //     Ciphertext<DCRTPoly> SC = replicateColumn(transposeRow(S, numColumns, true), numColumns);
-    //     printCtxt(cryptoContext, keyPair.secretKey, SC, "SC", numColumns, numBlocks);
-
-    //     Ciphertext<DCRTPoly> CMP = cmpAdv ?
-    //         compareAdv(SR, SC, dg_ca, df_ca) :
-    //         cryptoContext->EvalChebyshevSeries(SR - SC, cmpACoeffs, -1.0, 1.0);
-    //     CMP = CMP * rectMask2 + diagonal;
-    //     printCtxt(cryptoContext, keyPair.secretKey, CMP, "Argmax comparison result", numColumns, numColumns);
-
-    //     // Multiply the rows of CMP together
-    //     for (size_t i = 0; i < LOG2(numColumns); i++)
-    //     {
-    //         CMP = CMP * (CMP >> (1 << (LOG2(numColumns) + i)));
-    //         printCtxt(cryptoContext, keyPair.secretKey, CMP, "Argmax comparison result after multiplication " + std::to_string(i + 1), numColumns, numColumns);
-    //     }
-    //     R = CMP;    // argmax of S
-    //     printCtxt(cryptoContext, keyPair.secretKey, R, "Computed change-point", numColumns, numBlocks);
-    // }
-    // else if (changePointType == 1)
-    // {
-    //     std::cout << "Change-point type: variance" << std::endl;
-
-    //     Ciphertext<DCRTPoly> Q = sumColumns(X, numColumns, true);
-    //     printCtxt(cryptoContext, keyPair.secretKey, Q, "Sum of blocks", numColumns, numBlocks);
-
-    //     Q = (1.0 / blockSize) * Q;
-    //     printCtxt(cryptoContext, keyPair.secretKey, Q, "Mean of blocks", numColumns, numBlocks);
-
-    //     Q = replicateColumn(Q, numColumns);
-    //     printCtxt(cryptoContext, keyPair.secretKey, Q, "Replicated mean of blocks", numColumns, numBlocks);
-
-    //     Q = X - Q;
-    //     printCtxt(cryptoContext, keyPair.secretKey, Q, "Difference from mean", numColumns, numBlocks);
-
-    //     Q = (1.0 / (blockSize - 1)) * sumColumns(Q * Q, numColumns, true);
-    //     printCtxt(cryptoContext, keyPair.secretKey, Q, "Variance of blocks", numColumns, numBlocks);
-
-    //     Ciphertext<DCRTPoly> QT = replicateColumn(sumRows(Q, numColumns, true), numColumns);
-    //     printCtxt(cryptoContext, keyPair.secretKey, QT, "QT", numColumns, numBlocks);
-
-    //     Ciphertext<DCRTPoly> QP = replicateColumn(Q, numColumns) * triangularMask;
-    //     QP = sumRows(QP, numColumns, true);
-    //     printCtxt(cryptoContext, keyPair.secretKey, QP, "QP", numColumns, numBlocks);
-
-    //     Ciphertext<DCRTPoly> S = QP - multConstant * QT;
-    //     S = S * S;
-    //     printCtxt(cryptoContext, keyPair.secretKey, S, "CUSUM statistic", numColumns, numBlocks);
-
-    //     // Compute argmax of S
-    //     S = S * (2.0 / numBlocks);
-    //     Ciphertext<DCRTPoly> SR = replicateRow(S, numColumns);
-    //     printCtxt(cryptoContext, keyPair.secretKey, SR, "SR", numColumns, numBlocks);
-
-    //     Ciphertext<DCRTPoly> SC = replicateColumn(transposeRow(S, numColumns, true), numColumns);
-    //     printCtxt(cryptoContext, keyPair.secretKey, SC, "SC", numColumns, numBlocks);
-
-    //     Ciphertext<DCRTPoly> CMP = cmpAdv ?
-    //         compareAdv(SR, SC, dg_ca, df_ca) :
-    //         cryptoContext->EvalChebyshevSeries(SR - SC, cmpACoeffs, -1.0, 1.0);
-    //     CMP = CMP * rectMask2 + diagonal;
-    //     printCtxt(cryptoContext, keyPair.secretKey, CMP, "Argmax comparison result", numColumns, numColumns);
-
-    //     // Multiply the rows of CMP together
-    //     for (size_t i = 0; i < LOG2(numColumns); i++)
-    //     {
-    //         CMP = CMP * (CMP >> (1 << (LOG2(numColumns) + i)));
-    //         printCtxt(cryptoContext, keyPair.secretKey, CMP, "Argmax comparison result after multiplication " + std::to_string(i + 1), numColumns, numColumns);
-    //     }
-    //     R = CMP;    // argmax of S
-    //     printCtxt(cryptoContext, keyPair.secretKey, R, "Computed change-point", numColumns, numBlocks);
-    // }
-    // else if (changePointType == 2)
-    // {
-
-    std::cout << "Change-point type: frequency" << std::endl;
-
     std::vector<Ciphertext<DCRTPoly>> Q(numCiphertexts);
-    
-    #pragma omp parallel for
-    for(size_t k = 0; k < numCiphertexts; k++)
-    {
-        #pragma omp critical
-        { std::cout << "Processing ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
-        Ciphertext<DCRTPoly> C = compareAdv(X[k], (X[k] << 1), dg_ct, df_ct);
-        Ciphertext<DCRTPoly> D = C + (C << 1);
-        Ciphertext<DCRTPoly> E = D - 1;
-        Ciphertext<DCRTPoly> F = 1 - (E * E);
-        Ciphertext<DCRTPoly> G = F * rectMask;
-        Ciphertext<DCRTPoly> H = sumColumns(G, numColumns);
-        Q[k] = H * maskCol;
-        #pragma omp critical
-        { std::cout << "Finished ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
-    }
 
+    if (changePointType == 0)
+    {
+        std::cout << "Change-point type: mean" << std::endl;
+
+        #pragma omp parallel for
+        for(size_t k = 0; k < numCiphertexts; k++)
+        {
+            #pragma omp critical
+            { std::cout << "Processing ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
+            Q[k] = sumColumns(X[k], numColumns) * meanNorm;
+            #pragma omp critical
+            { std::cout << "Finished ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
+        }
+    }
+    else if (changePointType == 1)
+    {
+        std::cout << "Change-point type: variance" << std::endl;
+        
+        #pragma omp parallel for
+        for(size_t k = 0; k < numCiphertexts; k++)
+        {
+            #pragma omp critical
+            { std::cout << "Processing ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
+            Q[k] = sumColumns(X[k], numColumns) * meanNorm;
+            Q[k] = replicateColumn(Q[k], numColumns);
+            Q[k] = X[k] - Q[k];
+            Q[k] = Q[k] * Q[k];
+            Q[k] = sumColumns(Q[k], numColumns) * varNorm;
+            #pragma omp critical
+            { std::cout << "Finished ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
+        }
+    }
+    else if (changePointType == 2)
+    {
+        std::cout << "Change-point type: frequency" << std::endl;
+        
+        #pragma omp parallel for
+        for(size_t k = 0; k < numCiphertexts; k++)
+        {
+            #pragma omp critical
+            { std::cout << "Processing ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
+            Ciphertext<DCRTPoly> C = compareAdv(X[k], (X[k] << 1), dg_ct, df_ct);
+            Ciphertext<DCRTPoly> D = C + (C << 1);
+            Ciphertext<DCRTPoly> E = D - 1;
+            Ciphertext<DCRTPoly> F = 1 - (E * E);
+            Ciphertext<DCRTPoly> G = F * rectMask;
+            Ciphertext<DCRTPoly> H = sumColumns(G, numColumns);
+            Q[k] = H * maskCol;
+            #pragma omp critical
+            { std::cout << "Finished ciphertext " << k + 1 << " / " << numCiphertexts << std::endl; }
+        }
+    }
+    else
+    {
+        std::cerr << "Unknown change-point type: " << changePointType << std::endl;
+        return 1;
+    }
 
     std::vector<Ciphertext<DCRTPoly>> Q_compact(numCompactCiphertexts);
     #pragma omp parallel for
@@ -898,9 +843,7 @@ int main(int argc, char* argv[])
             if (compactRatio * k + j < numCiphertexts)
                 Q_compact[k] = Q_compact[k] + (Q[compactRatio * k + j] >> (256 * j));
         // computing partial sums
-        printCtxt(cryptoContext, keyPair.secretKey, Q_compact[k], "Q_compact[" + std::to_string(k) + "] before replication", 256, 256);
-        Q_compact[k] = replicateColumn(Q_compact[k], std::min(numBlocks, (size_t)256));
-        printCtxt(cryptoContext, keyPair.secretKey, Q_compact[k], "Q_compact[" + std::to_string(k) + "] after replication", 256, 256);
+        Q_compact[k] = replicateColumn(Q_compact[k], size);
     }
 
     std::vector<Ciphertext<DCRTPoly>> QP(numCompactCiphertexts);
@@ -910,15 +853,13 @@ int main(int argc, char* argv[])
         QP[k] = Q_compact[k] * triangularMask;
         for (size_t j = 0; j < k; j++)
             QP[k] = QP[k] + Q_compact[j];
-        QP[k] = sumRows(QP[k], std::min(numColumns, (size_t)256));
-        printCtxt(cryptoContext, keyPair.secretKey, QP[k], "QP[" + std::to_string(k) + "] after sumRows", 256, 1, 256);
+        QP[k] = sumRows(QP[k], size);
     }
 
     // replicate total sum QT
     Ciphertext<DCRTPoly> QT = QP[numCompactCiphertexts - 1] << indexQT;
     QT = QT * singletonMask;
-    QT = replicateColumn(QT, std::min(numBlocks, (size_t)256));
-    printCtxt(cryptoContext, keyPair.secretKey, QT, "QT", 256, 256);
+    QT = replicateColumn(QT, size);
 
     // Compute CUSUM statistic S
     std::vector<Ciphertext<DCRTPoly>> S(numCompactCiphertexts);
@@ -929,7 +870,6 @@ int main(int argc, char* argv[])
         S[k] = S[k] * S[k];
         auto mask = (k < numCompactCiphertexts - 1) ? normalizationMask : normalizationMaskLast;
         S[k] = S[k] * mask;
-        printCtxt(cryptoContext, keyPair.secretKey, S[k], "CUSUM statistic S[" + std::to_string(k) + "]", 256, 256);
     }
 
     // Compute argmax of S
@@ -940,11 +880,11 @@ int main(int argc, char* argv[])
         for (size_t j = 0; j < 2; j++)
         {
             if (j == 0)
-                SR[k] = replicateRow(S[k], 256);
+                SR[k] = replicateRow(S[k], size);
             else
             {
-                SC[k] = transposeRow(S[k], 256, true);
-                SC[k] = replicateColumn(SC[k], 256);
+                SC[k] = transposeRow(S[k], size, true);
+                SC[k] = replicateColumn(SC[k], size);
             }
         }
 
@@ -967,17 +907,11 @@ int main(int argc, char* argv[])
         CMP[i][i] = CMP[i][i] + diagonal;
         R[i] = tree_product(CMP[i]);
         // multiply the slots of R[i] together
-        for (size_t j = 0; j < LOG2(256); j++)
-            R[i] = R[i] * (R[i] >> (1 << (LOG2(256) + j)));
+        for (size_t j = 0; j < LOG2(size); j++)
+            R[i] = R[i] * (R[i] >> (1 << (LOG2(size) + j)));
     }
-    // else
-    // {
-    //     std::cerr << "Unknown change-point type: " << changePointType << std::endl;
-    //     return 1;
-    // }
 
-    double runtime = TOC(t);
-    std::cout << "CPD runtime: " << runtime << "s" << std::endl;
+    std::cout << "CPD runtime: " << TOC(t) << "s" << std::endl;
 
 
 
@@ -993,14 +927,14 @@ int main(int argc, char* argv[])
     {
         Plaintext plaintext;
         cryptoContext->Decrypt(keyPair.secretKey, R[i], &plaintext);
-        plaintext->SetLength(256);
+        plaintext->SetLength(size);
         std::vector<double> result = plaintext->GetRealPackedValue();
-        for (size_t j = 0; j < 256; j++)
+        for (size_t j = 0; j < size; j++)
         {
             if (result[j] > maxVal)
             {
                 maxVal = result[j];
-                maxIndex = i * 256 + j;
+                maxIndex = i * size + j;
             }
         }
     }

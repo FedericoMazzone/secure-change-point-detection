@@ -2,6 +2,7 @@
 #include "utils-eval.h"
 #include "utils-ptxt.h"
 #include "utils-matrices.h"
+#include "serial.h"
 
 #include "math/chebyshev.h"
 
@@ -763,9 +764,11 @@ int main(int argc, char* argv[])
     }
 
     std::cout << "DONE (" << TOC(t) << "s)" << std::endl;
+    size_t serializedSize = Serial::serialize(X[0]).size();
+    std::cout << "Size of encrypted time series: " << serializedSize * numCiphertexts << " bytes" << std::endl;
 
 
-
+    
     ////////////////////////////////////////////////////////////////////////
     //                                CPD                                 //
     ////////////////////////////////////////////////////////////////////////

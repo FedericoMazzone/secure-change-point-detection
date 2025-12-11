@@ -1,6 +1,9 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 import os
+import time
+
+from scipy.signal import lfilter
 
 
 def compute_innovations(
@@ -67,21 +70,48 @@ def gen_time_series(
     sd2 = np.sqrt(1 - phi2**2)  # standard deviation for innovations after change
 
     x = np.zeros(n)
+    
+    # --- Burn-in period (to stabilize the process) ---
+    if burn > 0:
+        innovation_burn = compute_innovations(distribution, size=burn, sd=sd1)
+        # for i in range(burn):
+        #     x[0] = phi1 * x[0] + innovation_burn[i]
 
-    # Burn-in period (to stabilize the process)
-    innovation = compute_innovations(distribution, size=burn, sd=sd1)
-    for i in range(burn):
-        x[0] = phi1 * x[0] + innovation[i]
+        x_burn = lfilter([1.0], [1.0, -phi1], innovation_burn)
+        x[0] = x_burn[-1]  # The final burn-in value goes to x[0]
+    else:
+        x[0] = 0.0
     
-    # Generate the AR(1) process before the change point
-    innovation = compute_innovations(distribution, size=t, sd=sd1)
-    for i in range(1, t):
-        x[i] = phi1 * x[i-1] + innovation[i]
+    # --- Pre-change segment (indices 1 to t-1) ---
+    if t > 1:
+        innovation_1 = compute_innovations(distribution, size=t-1, sd=sd1)
+        # for i in range(1, t):
+        #     x[i] = phi1 * x[i-1] + innovation_1[i - 1]
+
+        # lfilter assumes zero initial condition, but we start from x[0]
+        x_pre_zero_init = lfilter([1.0], [1.0, -phi1], innovation_1)
+        
+        # Account for starting from x[0]: add x[0] * phi1^k for k=1,2,...,t-1
+        k = np.arange(1, t)
+        carry = x[0] * (phi1 ** k)
+        x[1:t] = x_pre_zero_init + carry
+    elif t == 1:
+        # No pre-change segment (change happens immediately after burn-in)
+        pass
+
+    # ---------- Post-change segment (indices t to n-1) ----------
+    m = n - t
+    if m > 0:
+        innovation_2 = compute_innovations(distribution, size=n-t, sd=sd2)
+        # for i in range(t, n):
+        #     x[i] = phi2 * x[i-1] + innovation_2[i - t]
+
+        x_post_zero_init = lfilter([1.0], [1.0, -phi2], innovation_2)
     
-    # Generate the AR(1) process after the change point
-    innovation = compute_innovations(distribution, size=n - t, sd=sd2)
-    for i in range(t, n):
-        x[i] = phi2 * x[i-1] + innovation[i - t]
+    # Account for starting from x[t-1]
+    k = np.arange(1, m + 1)
+    carry = x[t-1] * (phi2 ** k)
+    x[t:n] = x_post_zero_init + carry
 
     return x, t
 

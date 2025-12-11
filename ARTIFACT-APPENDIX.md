@@ -55,7 +55,7 @@ our repository to avoid compatibility issues.
 
 ### Estimated Time and Storage Consumption
 
-The estimated overall human time to run the artifact is 2 minutes. While the actual computing to reproduce all the experiments (one time) requires around 2 hours, and uses at most 64 GB of RAM and 0.5 GB of disk space.
+The estimated overall human time to run the artifact is 2 minutes. While the actual computing to reproduce all the experiments (one time) requires around 3 hours, and uses at most 64 GB of RAM and 0.5 GB of disk space.
 
 ## Environment
 
@@ -78,7 +78,6 @@ sudo apt-get install python3
 pip3 install numpy
 pip3 install matplotlib
 pip3 install scipy
-pip3 install tqdm
 ```
 
 Install OpenFHE:
@@ -192,4 +191,4 @@ All the main results related to our solution can be reproduced through the artif
 
 ## Notes on Reusability
 
-Our solution has been implemented as the combination of two components: the summarization component (three are available: mean, variance, frequency) and the CUSUM computation component. These components can be modified or optimized indipendently. The CUSUM computation can be used for independent project or works.
+Our solution has been implemented as the combination of two components: the summarization component (three are available: mean, variance, frequency) and the CUSUM computation component. These components can be modified or optimized indipendently. The CUSUM computation can be used for independent projects or works.

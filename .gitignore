@@ -46,6 +46,7 @@ build/
 # Data
 data/tmp/
 data/out/
+data/generated/
 data/**/*.png
 
 # Log directory

@@ -1,87 +1,133 @@
-# This script creates N stationary AR(1) time series, each containing T data points.
-# A structural change occurs at time 'tau', where the AR(1) coefficient changes:
-# Xt = phi * X_{t-1} + eps_t,   for t = 1, ..., tau
-# Xt = phi2 * X_{t-1} + eps_t,  for t = tau+1, ..., T
-#
-# Key variables:
-# - T: Number of points in each time series.
-# - eps_t: Innovations (errors) whose distribution can change (e.g., Gaussian, Laplace, etc.).
-# - tau: Location of the Change Point, expressed as a fraction in [0,1].
-# - phi, phi2: AR(1) coefficients before and after the change point.
-# - innovations: This allows the user to modify the distribution of the innovations.
-# 
-# Outputs:
-# - 'data': Self-normalized CUSUM values for each time series.
-# - 'v': Frequency (in percentage) of rejecting the null hypothesis ("no change")
-#        for different change point locations and heights.
-# 
-# The results provide insight into the power of detecting changes in AR(1) processes.
-
 import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-# --- Parameters ---
-folder = "data/generated"   # Folder to save the generated time series
-distribution = "gaussian"   # Distribution of innovations (can be changed)
-n = 20000                   # Number of points in each time series
-x = np.zeros(n)             # AR(1) data container
-h = 0.4                     # Height of the change in AR(1) coefficient
-phi = 0.3                   # AR(1) coefficient before the change
-phi2 = phi + h              # AR(1) coefficient after the change
-tau = 0.5                   # Change point location in percentage
-T1 = int(tau * n)           # Change point location
-sd1 = np.sqrt(1 - phi**2)   # Standard deviation for innovations before change
-sd2 = np.sqrt(1 - phi2**2)  # Standard deviation for innovations after change
-sigma = lambda x: 1 / (1 + np.exp(-x))  # sigmoid function
 
+def compute_innovations(
+    distribution,
+    size,
+    sd
+):
+    """
+    Generate innovations from specified distribution.
 
-# --- AR(1) process generation ---
-for t in range(1, T1):  # Generate AR(1) process before the change point
+    Parameters:
+        distribution (str): Type of distribution ("gaussian", "laplace", "t").
+        size (int): Number of samples to generate.
+        sd (float): Standard deviation for the innovations.
+
+    Returns:
+        np.array: Generated innovations.
+    
+    Raises:
+        ValueError: If an unsupported distribution type is provided.
+    
+    Example:
+        innovations = compute_innovations("gaussian", 1000, 1.0)
+    """
+
     if distribution == "gaussian":
-        innovation = sd1 * np.random.randn()
+        return sd * np.random.randn(size)
     elif distribution == "laplace":
-        u = np.random.rand() - 0.5
-        innovation = -4 * np.sign(u) * np.log(1 - 2 * np.abs(u))  # Laplace(0, 4)
+        u = np.random.rand(size) - 0.5
+        return -4 * np.sign(u) * np.log(1 - 2 * np.abs(u))  # Laplace(0, 4)
     elif distribution == "t":
-        innovation = np.random.standard_t(5)
+        return np.random.standard_t(5, size=size)
     else:
         raise ValueError("Unsupported distribution type. Use 'gaussian', 'laplace', or 't'.")
-    x[t] = phi * x[t-1] + innovation
-for t in range(T1, n):  # Generate AR(1) process after the change point
-    if distribution == "gaussian":
-        innovation = sd2 * np.random.randn()
-    elif distribution == "laplace":
-        u = np.random.rand() - 0.5
-        innovation = -4 * np.sign(u) * np.log(1 - 2 * np.abs(u))
-    elif distribution == "t":
-        innovation = np.random.standard_t(5)
-    else:
-        raise ValueError("Unsupported distribution type. Use 'gaussian', 'laplace', or 't'.")
-    x[t] = phi2 * x[t-1] + innovation
-# x = sigma(x)  # Optional: uncomment if needed
 
-# --- Plotting ---
-plt.figure(figsize=(15, 6))
-plt.plot(x, color='black')
-plt.xlabel("time $t$")
-plt.ylabel("$X_t$")
-plt.title("Time series")
-plt.axvline(T1, color='red', linestyle='--', label='Change Point')
-plt.legend()
-plt.grid()
-plt.show()
 
-# --- Save time series and label (T1) to file ---
-if not os.path.exists(folder):
-    os.makedirs(folder)
-filename = f"time_series_{distribution}_n{n}.csv"
-filepath = os.path.join(folder, filename)
-# save time series as x1,...,xn,T1 with a 3 decimal precision
-x = np.round(x, 3)  # Round to 3 decimal places
-with open(filepath, "w", newline='') as f:
-    f.write(",".join(map(str, x)) + f",{T1}\n")
-print(f"Time series saved to {filepath}")
 
-# save the plot
-plt.savefig(filepath.replace('.csv', '.png'))
+def gen_time_series(
+    n,
+    distribution="gaussian",
+    phi1 = 0.3,
+    phi2 = 0.7,
+    tau = 0.5,
+    burn = 500
+):
+    """
+    Generate a time series with a change in AR(1) coefficient at a specified point.
+
+    Parameters:
+        n (int): Length of the time series.
+        distribution (str): Distribution of innovations ("gaussian", "laplace", "t").
+        phi1 (float): AR(1) coefficient before the change.
+        phi2 (float): AR(1) coefficient after the change.
+        tau (float): Change point location ratio (between 0 and 1).
+        burn (int): Burn-in period (initial samples to discard).
+
+    Returns:
+        np.array: Generated time series.
+        int: Change point index.
+    """
+
+    t = int(tau * n)            # change point index
+    sd1 = np.sqrt(1 - phi1**2)  # standard deviation for innovations before change
+    sd2 = np.sqrt(1 - phi2**2)  # standard deviation for innovations after change
+
+    x = np.zeros(n)
+
+    # Burn-in period (to stabilize the process)
+    innovation = compute_innovations(distribution, size=burn, sd=sd1)
+    for i in range(burn):
+        x[0] = phi1 * x[0] + innovation[i]
+    
+    # Generate the AR(1) process before the change point
+    innovation = compute_innovations(distribution, size=t, sd=sd1)
+    for i in range(1, t):
+        x[i] = phi1 * x[i-1] + innovation[i]
+    
+    # Generate the AR(1) process after the change point
+    innovation = compute_innovations(distribution, size=n - t, sd=sd2)
+    for i in range(t, n):
+        x[i] = phi2 * x[i-1] + innovation[i - t]
+
+    return x, t
+
+
+
+if __name__ == "__main__":
+
+    folder = "data/generated/frequency-change"   # Folder to save the time series
+    plot = True                 # Whether to plot the time series
+    distribution = "gaussian"   # Distribution of innovations ["gaussian", "laplace", "t"]
+    n = 10000                   # Number of points in each time series
+    phi1 = 0.3                  # AR(1) coefficient before the change
+    phi2 = 0.7                  # AR(1) coefficient after the change
+    tau = 0.5                   # Change point location in percentage
+    burn = 500                  # Burn-in period
+
+    # --- Generate time series ---
+    x, t = gen_time_series(
+        n=n,
+        distribution=distribution,
+        phi1=phi1,
+        phi2=phi2,
+        tau=tau,
+        burn=burn
+    )
+
+    # --- Save time series (x) and label (t) to file ---
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    filename = f"time_series_{distribution}_n{n}.csv"
+    filepath = os.path.join(folder, filename)
+    # save time series as x1,...,xn,t with a 3 decimal precision
+    x = np.round(x, 3)  # Round to 3 decimal places
+    with open(filepath, "w", newline='') as f:
+        f.write(",".join(map(str, x)) + f",{t}\n")
+    print(f"Time series saved to {filepath}")
+
+    # --- Plotting ---
+    if plot:
+        plt.figure(figsize=(15, 6))
+        plt.plot(x, color='black')
+        plt.xlabel("time $t$")
+        plt.ylabel("$X_t$")
+        plt.title("Time series")
+        plt.axvline(t, color='red', linestyle='--', label='Change Point')
+        plt.legend()
+        plt.grid()
+        plt.savefig(filepath.replace('.csv', '.png'))
+

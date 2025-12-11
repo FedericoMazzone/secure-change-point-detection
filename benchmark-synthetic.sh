@@ -2,7 +2,7 @@
 
 executable="./build/cpd"
 
-output_file="benchmark_cpd.out"
+output_file="benchmark-synthetic.out"
 
 if [ ! -s "$output_file" ]; then
     echo "dataset,type,length,encrypt_runtime(s),turning_runtime(s),partials_runtime(s),argmax_runtime(s),cpd_runtime(s),memory(MB)" > "$output_file"
@@ -13,10 +13,6 @@ if [ ! -d "logs" ]; then
 fi
 
 files=(
-    "data/meditation.csv"
-    "data/patient5-S2toS3.csv"
-    "data/traffic_network.csv"
-
     "data/generated/mean-change/time_series_n1000_normal_0_1_to_normal_1_1.csv"
     "data/generated/mean-change/time_series_n10000_normal_0_1_to_normal_1_1.csv"
     "data/generated/mean-change/time_series_n20000_normal_0_1_to_normal_1_1.csv"
@@ -43,10 +39,6 @@ files=(
 )
 
 types=(
-    "frequency"
-    "frequency"
-    "frequency"
-
     "mean"
     "mean"
     "mean"
@@ -71,11 +63,6 @@ types=(
     "frequency"
     "frequency"
 )
-
-if [ "${#files[@]}" -ne "${#types[@]}" ]; then
-    echo "Error: files[] and types[] have different lengths."
-    exit 1
-fi
 
 for i in "${!files[@]}"; do
     file="${files[$i]}"

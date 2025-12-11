@@ -2,54 +2,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 
-def gen_time_series(
-    n,
-    distribution="gaussian",
-    phi1 = 0.3,
-    phi2 = 0.7,
-    tau = 0.5,
-    burn = 500,
-):
-    x = np.zeros(n)
-    T1 = int(tau * n)
-    sd1 = np.sqrt(1 - phi1**2)
-    sd2 = np.sqrt(1 - phi2**2)
-
-    for t in range(burn):
-        if distribution == "gaussian":
-            innovation = sd1 * np.random.randn()
-        elif distribution == "laplace":
-            u = np.random.rand() - 0.5
-            innovation = -4 * np.sign(u) * np.log(1 - 2 * np.abs(u))  # Laplace(0, 4)
-        elif distribution == "t":
-            innovation = np.random.standard_t(5)
-        else:
-            raise ValueError("Unsupported distribution type. Use 'gaussian', 'laplace', or 't'.")
-        x[0] = phi1 * x[0] + innovation  # Burn-in period to stabilize the process
-    for t in range(1, T1):  # Generate AR(1) process before the change point
-        if distribution == "gaussian":
-            innovation = sd1 * np.random.randn()
-        elif distribution == "laplace":
-            u = np.random.rand() - 0.5
-            innovation = -4 * np.sign(u) * np.log(1 - 2 * np.abs(u))  # Laplace(0, 4)
-        elif distribution == "t":
-            innovation = np.random.standard_t(5)
-        else:
-            raise ValueError("Unsupported distribution type. Use 'gaussian', 'laplace', or 't'.")
-        x[t] = phi1 * x[t-1] + innovation
-    for t in range(T1, n):  # Generate AR(1) process after the change point
-        if distribution == "gaussian":
-            innovation = sd2 * np.random.randn()
-        elif distribution == "laplace":
-            u = np.random.rand() - 0.5
-            innovation = -4 * np.sign(u) * np.log(1 - 2 * np.abs(u))
-        elif distribution == "t":
-            innovation = np.random.standard_t(5)
-        else:
-            raise ValueError("Unsupported distribution type. Use 'gaussian', 'laplace', or 't'.")
-        x[t] = phi2 * x[t-1] + innovation
-
-    return x, T1
+from data_utils.ts_gen_freq_change import gen_time_series
 
 
 def turning_rates(x, m=None):
@@ -58,11 +11,11 @@ def turning_rates(x, m=None):
     statistic of each block.
 
     Parameters:
-    x (list or array-like): Time series data.
-    m (int): Block length.
+        x (list or array-like): Time series data.
+        m (int): Block length.
 
     Returns:
-    np.array: Turning rates for each block.
+        np.array: Turning rates for each block.
     """
     n = len(x)
 
@@ -92,6 +45,7 @@ def clip(x, M):
 def run_experiment(
     n = 10000,              # length of time series
     num_experiments = 100,  # number of experiments
+    eps_list = [1.0],       # list of privacy budgets
     M = 1.0,                # clipping bound
 ):
     t = n // 2       # change point
@@ -99,6 +53,7 @@ def run_experiment(
 
     print(f"Length of time series n = {n}")
     print(f"Number of experiments = {num_experiments}")
+    print(f"Privacy budgets epsilon = {eps_list}")
     print(f"Clipping bound M = {M}")
     print(f"Change point t = {t}")
     print(f"Using block size m = {m}")
@@ -113,7 +68,6 @@ def run_experiment(
 
     print("\n=== Running local DP change point detection experiments ===")
     rel_err = {}
-    eps_list = [1] # list(np.arange(0.5, 30.5, 0.5))
 
     for eps in eps_list:
         errs = []
@@ -123,13 +77,13 @@ def run_experiment(
 
             # DP parameters
             delta = 1 / len(x)**2
-            L = - math.log(delta)
+            L = -math.log(delta)
             Delta = 2 * M
             sigma_DP = Delta * (math.sqrt(L) + math.sqrt(L + eps)) / (math.sqrt(2) * eps)
             
             # Client privatization
             noise = np.random.normal(0, sigma_DP, size=len(x))
-            x_priv = np.array(x) # + noise
+            x_priv = np.array(x) + noise
 
             # Server detection
             tr = turning_rates(x_priv, m)
@@ -138,24 +92,46 @@ def run_experiment(
             idx_epoch = np.argmax(cs)
             idx_time = min(len(x), max(1, idx_epoch * m))
 
-            print(idx_time)
-
             errs.append(abs(idx_time - t) / t)
 
         rel_err[eps] = float(np.mean(errs))
         print(f"Relative error for eps = {eps}: {rel_err[eps]}")
+    
+    return rel_err
 
 
 
 if __name__ == "__main__":
 
-    
+    # Setup experiment configurations
+    experiment_config = [                       # (n, num_experiments)
+        (1000, 10),
+        (10000, 1),
+        (100000, 1),
+        (1000000, 1)
+    ]
+    eps_list = np.arange(0.5, 30.5, 0.5).tolist()   # list of privacy budgets
+    M = 1.0                                         # clipping bound
 
-    # plot relative error vs epsilon
+    # Run experiments
+    rel_err = {}
+    for n, num_experiments in experiment_config:
+        rel_err[n] = run_experiment(
+            n = n,
+            num_experiments = num_experiments,
+            eps_list = eps_list,
+            M = M
+        )
+
+    # Plot results in one figure
     plt.figure(figsize=(10, 6))
-    plt.plot(list(rel_err.keys()), list(rel_err.values()), marker='o')
-    plt.xlabel("Privacy Budget ε")
-    plt.ylabel("Relative Error in Change Point Detection")
-    plt.title("Local DP Change Point Detection Relative Error vs Privacy Budget")
-    plt.grid()
-    plt.savefig("benchmark-localDP.png")
+    for n in rel_err:
+        epsilons = list(rel_err[n].keys())
+        errors = list(rel_err[n].values())
+        plt.plot(epsilons, errors, marker='o', label=f'n={n}')
+    plt.xlabel('Privacy Budget (epsilon)')
+    plt.ylabel('Relative Error')
+    plt.title('Local DP Change Point Detection Accuracy')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('benchmark-localDP.png')

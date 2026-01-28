@@ -18,6 +18,8 @@ cmake_minimum_required(VERSION 3.15)
 
 project(demo CXX)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 option(BUILD_STATIC "Set to ON to include static versions of the library" OFF)
 option(USE_SYSTEM_OPENFHE "Use OpenFHE already installed on the system" OFF)
 
@@ -25,102 +27,108 @@ set(OPENFHE_SOURCE_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/openfhe-development-1.1.2"
     CACHE PATH "Bundled OpenFHE source directory")
 
-set(OPENFHE_INSTALL_PREFIX
-    "${CMAKE_BINARY_DIR}/_deps/openfhe/install"
-    CACHE PATH "Local OpenFHE install prefix")
+# Directory di build di OpenFHE (quando bundled)
+set(OPENFHE_BUNDLED_BUILD_DIR
+    "${CMAKE_BINARY_DIR}/_deps/openfhe-build"
+    CACHE PATH "Bundled OpenFHE build directory")
 
-include(ExternalProject)
+# ------------------------------------------------------------
+# OpenFHE: o di sistema (find_package) o bundled (add_subdirectory)
+# ------------------------------------------------------------
+if(USE_SYSTEM_OPENFHE)
 
-if(NOT USE_SYSTEM_OPENFHE)
-    
-    find_package(OpenFHE CONFIG QUIET)
+    find_package(OpenFHE CONFIG REQUIRED)
 
-    if(NOT OpenFHE_FOUND)
-        
-        message(STATUS "OpenFHE not found. Building bundled OpenFHE...")
+    if (OpenFHE_FOUND)
+        message(STATUS "FOUND PACKAGE OpenFHE")
+        message(STATUS "OpenFHE Version: ${BASE_OPENFHE_VERSION}")
+        message(STATUS "OpenFHE installed as shared libraries: ${OpenFHE_SHARED}")
+        message(STATUS "OpenFHE include files location: ${OpenFHE_INCLUDE}")
+        message(STATUS "OpenFHE lib files location: ${OpenFHE_LIBDIR}")
+        message(STATUS "OpenFHE Native Backend size: ${OpenFHE_NATIVE_SIZE}")
+    else()
+        message(FATAL_ERROR "PACKAGE OpenFHE NOT FOUND")
+    endif ()
 
-        ExternalProject_Add(openfhe_ep
-            SOURCE_DIR  "${OPENFHE_SOURCE_DIR}"
-            PREFIX      "${CMAKE_BINARY_DIR}/_deps/openfhe"
-            INSTALL_DIR "${OPENFHE_INSTALL_PREFIX}"
+    set(CMAKE_CXX_FLAGS ${OpenFHE_CXX_FLAGS})
 
-            CMAKE_ARGS
-                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-                -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-                -DBUILD_SHARED=ON
-                -DBUILD_UNITTESTS=OFF
-                -DBUILD_EXAMPLES=OFF
+    include_directories(${OPENMP_INCLUDES})
+    include_directories(${OpenFHE_INCLUDE})
+    include_directories(${OpenFHE_INCLUDE}/third-party/include)
+    include_directories(${OpenFHE_INCLUDE}/core)
+    include_directories(${OpenFHE_INCLUDE}/pke)
+    include_directories(${OpenFHE_INCLUDE}/binfhe)
 
-            BUILD_COMMAND   ${CMAKE_COMMAND} --build <BINARY_DIR> -j
-            INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
-        )
+    link_directories(${OpenFHE_LIBDIR})
+    link_directories(${OPENMP_LIBRARIES})
 
-        list(PREPEND CMAKE_PREFIX_PATH "${OPENFHE_INSTALL_PREFIX}")
-
-        find_package(OpenFHE CONFIG REQUIRED)
-
+    if(BUILD_STATIC)
+        set(CMAKE_EXE_LINKER_FLAGS "${OpenFHE_EXE_LINKER_FLAGS} -static")
+        link_libraries(${OpenFHE_STATIC_LIBRARIES})
+    else()
+        set(CMAKE_EXE_LINKER_FLAGS ${OpenFHE_EXE_LINKER_FLAGS})
+        link_libraries(${OpenFHE_SHARED_LIBRARIES})
     endif()
 
 else()
 
-    find_package(OpenFHE CONFIG REQUIRED)
+    message(STATUS "Building bundled OpenFHE from ${OPENFHE_SOURCE_DIR}")
+
+    # Make OpenFHE self-contained (even if we never run "install")
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/_deps/openfhe-install" CACHE PATH "" FORCE)
+
+    set(BUILD_SHARED ON CACHE BOOL "Build shared OpenFHE libraries" FORCE)
+    set(BUILD_UNITTESTS OFF CACHE BOOL "Disable OpenFHE unit tests" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "Disable OpenFHE examples" FORCE)
+    set(BUILD_BENCHMARKS OFF CACHE BOOL "Disable OpenFHE benchmarks" FORCE)
+
+    add_subdirectory("${OPENFHE_SOURCE_DIR}" "${OPENFHE_BUNDLED_BUILD_DIR}")
+
+
+    # Include pragmatici (struttura standard OpenFHE)
+    include_directories("${OPENFHE_SOURCE_DIR}/src")
+    include_directories("${OPENFHE_SOURCE_DIR}/src/core")
+    include_directories("${OPENFHE_SOURCE_DIR}/src/pke")
+    include_directories("${OPENFHE_SOURCE_DIR}/src/binfhe")
+    include_directories("${OPENFHE_SOURCE_DIR}/third-party/include")
+    include_directories("${OPENFHE_SOURCE_DIR}/third-party/cereal/include")
+    include_directories("${OPENFHE_SOURCE_DIR}/src/pke/include")
+    include_directories("${OPENFHE_SOURCE_DIR}/src/core/include")
+    include_directories("${OPENFHE_SOURCE_DIR}/src/binfhe/include")
+    include_directories("${OPENFHE_BUNDLED_BUILD_DIR}/src/core")
+    include_directories("${OPENFHE_BUNDLED_BUILD_DIR}/src/core/include")
+    include_directories("${OPENFHE_BUNDLED_BUILD_DIR}/third-party/include")
+    include_directories("${OPENFHE_BUNDLED_BUILD_DIR}/third-party/cereal/include")
+
+    # Dove finiscono di solito le .so buildate (a seconda della piattaforma)
+    set(OPENFHE_BUNDLED_LIBDIR1 "${OPENFHE_BUNDLED_BUILD_DIR}/lib")
+    set(OPENFHE_BUNDLED_LIBDIR2 "${OPENFHE_BUNDLED_BUILD_DIR}/lib64")
 
 endif()
 
-if (OpenFHE_FOUND)
-    message(STATUS "FOUND PACKAGE OpenFHE")
-    message(STATUS "OpenFHE Version: ${BASE_OPENFHE_VERSION}")
-    message(STATUS "OpenFHE installed as shared libraries: ${OpenFHE_SHARED}")
-    message(STATUS "OpenFHE include files location: ${OpenFHE_INCLUDE}")
-    message(STATUS "OpenFHE lib files location: ${OpenFHE_LIBDIR}")
-    message(STATUS "OpenFHE Native Backend size: ${OpenFHE_NATIVE_SIZE}")
-else()
-    message(FATAL_ERROR "PACKAGE OpenFHE NOT FOUND")
-endif ()
-
-set( CMAKE_CXX_FLAGS ${OpenFHE_CXX_FLAGS} )
-
-include_directories( ${OPENMP_INCLUDES} )
-include_directories( ${OpenFHE_INCLUDE} )
-include_directories( ${OpenFHE_INCLUDE}/third-party/include )
-include_directories( ${OpenFHE_INCLUDE}/core )
-include_directories( ${OpenFHE_INCLUDE}/pke )
-include_directories( ${OpenFHE_INCLUDE}/binfhe )
-### add directories for other OpenFHE modules as needed for your project
-
-link_directories( ${OpenFHE_LIBDIR} )
-link_directories( ${OPENMP_LIBRARIES} )
-if(BUILD_STATIC)
-    set( CMAKE_EXE_LINKER_FLAGS "${OpenFHE_EXE_LINKER_FLAGS} -static")
-    link_libraries( ${OpenFHE_STATIC_LIBRARIES} )
-else()
-    set( CMAKE_EXE_LINKER_FLAGS ${OpenFHE_EXE_LINKER_FLAGS} )
-    link_libraries( ${OpenFHE_SHARED_LIBRARIES} )
-endif()
-
-### ADD YOUR EXECUTABLE(s) HERE
-### add_executable( EXECUTABLE-NAME SOURCES )
-###
-### EXAMPLE:
-### add_executable( test demo-simple-example.cpp )
-
-set( SOURCES
-        src/utils-basics.cpp
-        src/utils-eval.cpp
-        src/utils-matrices.cpp
-        src/utils-ptxt.cpp
-        src/cpd.cpp
+# ------------------------------------------------------------
+# Il tuo eseguibile
+# ------------------------------------------------------------
+set(SOURCES
+    src/utils-basics.cpp
+    src/utils-eval.cpp
+    src/utils-matrices.cpp
+    src/utils-ptxt.cpp
+    src/cpd.cpp
 )
 
-add_executable( cpd ${SOURCES} )
+add_executable(cpd ${SOURCES})
 
+# Se OpenFHE è bundled, linka ai target OpenFHE e imposta RPATH
 if(NOT USE_SYSTEM_OPENFHE)
-    set_target_properties(cpd PROPERTIES
-        BUILD_RPATH   "${OPENFHE_INSTALL_PREFIX}/lib"
-        INSTALL_RPATH "${OPENFHE_INSTALL_PREFIX}/lib"
-    )
-endif()
 
-if(TARGET openfhe_ep)
-    add_dependencies(cpd openfhe_ep)
+    # Target OpenFHE tipici (se la tua versione usa nomi diversi, l'errore lo dirà chiaramente)
+    target_link_libraries(cpd PRIVATE OPENFHEpke OPENFHEcore OPENFHEbinfhe)
+
+    # RPATH: evita LD_LIBRARY_PATH quando si usa OpenFHE bundled
+    set_target_properties(cpd PROPERTIES
+        BUILD_RPATH   "${OPENFHE_BUNDLED_LIBDIR1};${OPENFHE_BUNDLED_LIBDIR2}"
+        INSTALL_RPATH "${OPENFHE_BUNDLED_LIBDIR1};${OPENFHE_BUNDLED_LIBDIR2}"
+    )
+
 endif()

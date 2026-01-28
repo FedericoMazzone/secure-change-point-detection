@@ -1,4 +1,4 @@
-cmake_minimum_required (VERSION 3.5.1)
+cmake_minimum_required(VERSION 3.15)
 
 ### To use gcc/g++ on a Macintosh, you must set the Compilers
 ### here, not inside the project
@@ -18,9 +18,55 @@ cmake_minimum_required (VERSION 3.5.1)
 
 project(demo CXX)
 set(CMAKE_CXX_STANDARD 17)
-option( BUILD_STATIC "Set to ON to include static versions of the library" OFF)
+option(BUILD_STATIC "Set to ON to include static versions of the library" OFF)
+option(USE_SYSTEM_OPENFHE "Use OpenFHE already installed on the system" OFF)
 
-find_package(OpenFHE CONFIG REQUIRED)
+set(OPENFHE_SOURCE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/openfhe-development-1.1.2"
+    CACHE PATH "Bundled OpenFHE source directory")
+
+set(OPENFHE_INSTALL_PREFIX
+    "${CMAKE_BINARY_DIR}/_deps/openfhe/install"
+    CACHE PATH "Local OpenFHE install prefix")
+
+include(ExternalProject)
+
+if(NOT USE_SYSTEM_OPENFHE)
+    
+    find_package(OpenFHE CONFIG QUIET)
+
+    if(NOT OpenFHE_FOUND)
+        
+        message(STATUS "OpenFHE not found. Building bundled OpenFHE...")
+
+        ExternalProject_Add(openfhe_ep
+            SOURCE_DIR  "${OPENFHE_SOURCE_DIR}"
+            PREFIX      "${CMAKE_BINARY_DIR}/_deps/openfhe"
+            INSTALL_DIR "${OPENFHE_INSTALL_PREFIX}"
+
+            CMAKE_ARGS
+                -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+                -DBUILD_SHARED=ON
+                -DBUILD_UNITTESTS=OFF
+                -DBUILD_EXAMPLES=OFF
+
+            BUILD_COMMAND   ${CMAKE_COMMAND} --build <BINARY_DIR> -j
+            INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+        )
+
+        list(PREPEND CMAKE_PREFIX_PATH "${OPENFHE_INSTALL_PREFIX}")
+
+        find_package(OpenFHE CONFIG REQUIRED)
+
+    endif()
+
+else()
+
+    find_package(OpenFHE CONFIG REQUIRED)
+
+endif()
+
 if (OpenFHE_FOUND)
     message(STATUS "FOUND PACKAGE OpenFHE")
     message(STATUS "OpenFHE Version: ${BASE_OPENFHE_VERSION}")
@@ -67,3 +113,14 @@ set( SOURCES
 )
 
 add_executable( cpd ${SOURCES} )
+
+if(NOT USE_SYSTEM_OPENFHE)
+    set_target_properties(cpd PROPERTIES
+        BUILD_RPATH   "${OPENFHE_INSTALL_PREFIX}/lib"
+        INSTALL_RPATH "${OPENFHE_INSTALL_PREFIX}/lib"
+    )
+endif()
+
+if(TARGET openfhe_ep)
+    add_dependencies(cpd openfhe_ep)
+endif()

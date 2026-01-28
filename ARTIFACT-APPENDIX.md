@@ -104,37 +104,20 @@ docker run -it secure-cpd
 
 Install prerequisites:
 ```bash
-sudo apt-get install build-essential
-sudo apt-get install cmake
-sudo apt-get install python3
-pip3 install numpy
-pip3 install matplotlib
-pip3 install scipy
+sudo apt-get install build-essential cmake python3
+pip3 install numpy matplotlib scipy
 ```
 
-Install OpenFHE:
+Build the project:
 ```bash
-cd openfhe-development-1.1.2
-mkdir build
-cd build
-cmake ..
-make -j
-sudo make install
-cd ../..
-echo 'export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH' >> ~/.bashrc
-source ~/.bashrc
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
 ```
 
-Install our library:
+To clean the build (and remove the local OpenFHE installation):
 ```bash
-mkdir build
-cd build
-cmake ..
-make -j
-cd ..
+rm -rf build
 ```
-
-If you do not have sudo access in your machine, specify a different installation path for OpenFHE. See more about this in the README file.
 </details>
 
 ### Testing the Environment

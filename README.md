@@ -34,6 +34,14 @@ sudo apt-get install build-essential cmake python3
 pip3 install -r requirements.txt
 ```
 
+Note: on some systems this may fail with "This environment is externally managed".
+In this case, you can use a virtual environment (see below):
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
 Build the project:
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release

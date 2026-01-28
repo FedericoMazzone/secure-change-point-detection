@@ -105,7 +105,7 @@ docker run -it secure-cpd
 Install prerequisites:
 ```bash
 sudo apt-get install build-essential cmake python3
-pip3 install numpy matplotlib scipy
+pip3 install -r requirements.txt
 ```
 
 Build the project:
